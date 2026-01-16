@@ -138,6 +138,36 @@ Ensure valid JSON. Do not output this text outside the tags.
                 const jsonStr = match[1].trim();
                 const parsedData: SpatialPacket = JSON.parse(jsonStr);
 
+                // Validate and deduplicate characters (last occurrence wins)
+                if (parsedData.characters && Array.isArray(parsedData.characters)) {
+                    const deduplicatedChars: CharacterSpatialInfo[] = [];
+                    const seenNames = new Set<string>();
+
+                    // Process in reverse to keep last occurrence
+                    for (let i = parsedData.characters.length - 1; i >= 0; i--) {
+                        const char = parsedData.characters[i];
+                        if (char && char.name && !seenNames.has(char.name)) {
+                            // Validate numeric fields
+                            const x = typeof char.x === 'number' ? char.x : (typeof char.x === 'string' ? parseFloat(char.x) : 0);
+                            const y = typeof char.y === 'number' ? char.y : (typeof char.y === 'string' ? parseFloat(char.y) : 0);
+
+                            if (!isNaN(x) && !isNaN(y)) {
+                                deduplicatedChars.unshift({
+                                    name: char.name,
+                                    x: x,
+                                    y: y,
+                                    status: char.status || 'unknown'
+                                });
+                                seenNames.add(char.name);
+                            } else {
+                                console.warn(`Spatial System: Invalid coordinates for character "${char.name}"`, { x, y });
+                            }
+                        }
+                    }
+
+                    parsedData.characters = deduplicatedChars;
+                }
+
                 // Update our state with the new data
                 newState.spatialData = parsedData;
                 newState.lastUpdate = Date.now();
