@@ -1,95 +1,65 @@
-import {ReactElement} from "react";
-import {StageBase, StageResponse, InitialData, Message} from "@chub-ai/stages-ts";
-import {LoadResponse} from "@chub-ai/stages-ts/dist/types/load";
+import { ReactElement, useState, useEffect } from "react";
+import { StageBase, StageResponse, InitialData, Message } from "@chub-ai/stages-ts";
+import { LoadResponse } from "@chub-ai/stages-ts/dist/types/load";
+
+/**
+ * DATA STRUCTURES
+ * Defines the shape of our spatial data.
+ */
+
+interface CharacterSpatialInfo {
+    name: string;
+    x: number; // Horizontal distance relative to user (0)
+    y: number; // Vertical/Depth distance relative to user (0)
+    status: string; // Short status description
+}
+
+interface SpatialPacket {
+    characters: CharacterSpatialInfo[];
+}
 
 /***
- The type that this stage persists message-level state in.
- This is primarily for readability, and not enforced.
-
- @description This type is saved in the database after each message,
-  which makes it ideal for storing things like positions and statuses,
-  but not for things like history, which is best managed ephemerally
-  in the internal state of the Stage class itself.
+ * MessageStateType
+ * We persist the list of character positions here.
  ***/
-type MessageStateType = any;
+type MessageStateType = {
+    spatialData: SpatialPacket;
+    lastUpdate: number; // Timestamp of last update
+};
 
 /***
- The type of the stage-specific configuration of this stage.
-
- @description This is for things you want people to be able to configure,
-  like background color.
+ * ConfigType
+ * Simple ON/OFF toggle for the system.
  ***/
-type ConfigType = any;
+type ConfigType = {
+    isActive: boolean;
+};
 
-/***
- The type that this stage persists chat initialization state in.
- If there is any 'constant once initialized' static state unique to a chat,
- like procedurally generated terrain that is only created ONCE and ONLY ONCE per chat,
- it belongs here.
- ***/
 type InitStateType = any;
-
-/***
- The type that this stage persists dynamic chat-level state in.
- This is for any state information unique to a chat,
-    that applies to ALL branches and paths such as clearing fog-of-war.
- It is usually unlikely you will need this, and if it is used for message-level
-    data like player health then it will enter an inconsistent state whenever
-    they change branches or jump nodes. Use MessageStateType for that.
- ***/
 type ChatStateType = any;
 
-/***
- A simple example class that implements the interfaces necessary for a Stage.
- If you want to rename it, be sure to modify App.js as well.
- @link https://github.com/CharHubAI/chub-stages-ts/blob/main/src/types/stage.ts
- ***/
+const SPATIAL_TAG_OPEN = "<spatial_system>";
+const SPATIAL_TAG_CLOSE = "</spatial_system>";
+
 export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateType, ConfigType> {
 
-    /***
-     A very simple example internal state. Can be anything.
-     This is ephemeral in the sense that it isn't persisted to a database,
-     but exists as long as the instance does, i.e., the chat page is open.
-     ***/
-    myInternalState: {[key: string]: any};
+    // Internal ephemeral state to hold the data for rendering
+    myInternalState: MessageStateType;
 
     constructor(data: InitialData<InitStateType, ChatStateType, MessageStateType, ConfigType>) {
-        /***
-         This is the first thing called in the stage,
-         to create an instance of it.
-         The definition of InitialData is at @link https://github.com/CharHubAI/chub-stages-ts/blob/main/src/types/initial.ts
-         Character at @link https://github.com/CharHubAI/chub-stages-ts/blob/main/src/types/character.ts
-         User at @link https://github.com/CharHubAI/chub-stages-ts/blob/main/src/types/user.ts
-         ***/
         super(data);
-        const {
-            characters,         // @type:  { [key: string]: Character }
-            users,                  // @type:  { [key: string]: User}
-            config,                                 //  @type:  ConfigType
-            messageState,                           //  @type:  MessageStateType
-            environment,                     // @type: Environment (which is a string)
-            initState,                             // @type: null | InitStateType
-            chatState                              // @type: null | ChatStateType
-        } = data;
-        this.myInternalState = messageState != null ? messageState : {'someKey': 'someValue'};
-        this.myInternalState['numUsers'] = Object.keys(users).length;
-        this.myInternalState['numChars'] = Object.keys(characters).length;
+        const { messageState, config } = data;
+
+        // Initialize state if it doesn't exist
+        this.myInternalState = messageState || {
+            spatialData: { characters: [] },
+            lastUpdate: Date.now()
+        };
     }
 
     async load(): Promise<Partial<LoadResponse<InitStateType, ChatStateType, MessageStateType>>> {
-        /***
-         This is called immediately after the constructor, in case there is some asynchronous code you need to
-         run on instantiation.
-         ***/
         return {
-            /*** @type boolean @default null
-             @description The 'success' boolean returned should be false IFF (if and only if), some condition is met that means
-              the stage shouldn't be run at all and the iFrame can be closed/removed.
-              For example, if a stage displays expressions and no characters have an expression pack,
-              there is no reason to run the stage, so it would return false here. ***/
             success: true,
-            /*** @type null | string @description an error message to show
-             briefly at the top of the screen, if any. ***/
             error: null,
             initState: null,
             chatState: null,
@@ -97,109 +67,162 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
     }
 
     async setState(state: MessageStateType): Promise<void> {
-        /***
-         This can be called at any time, typically after a jump to a different place in the chat tree
-         or a swipe. Note how neither InitState nor ChatState are given here. They are not for
-         state that is affected by swiping.
-         ***/
-        if (state != null) {
-            this.myInternalState = {...this.myInternalState, ...state};
+        // Called when browsing history/swiping. We must update our internal view.
+        if (state) {
+            this.myInternalState = state;
         }
     }
 
+    /***
+     * BEFORE PROMPT
+     * Inject the instructions to the LLM to generate the JSON.
+     ***/
     async beforePrompt(userMessage: Message): Promise<Partial<StageResponse<ChatStateType, MessageStateType>>> {
-        /***
-         This is called after someone presses 'send', but before anything is sent to the LLM.
-         ***/
-        const {
-            content,            /*** @type: string
-             @description Just the last message about to be sent. ***/
-            anonymizedId,       /*** @type: string
-             @description An anonymized ID that is unique to this individual
-              in this chat, but NOT their Chub ID. ***/
-            isBot             /*** @type: boolean
-             @description Whether this is itself from another bot, ex. in a group chat. ***/
-        } = userMessage;
+        // If the stage is turned off in config, do nothing.
+        if (this.data.config?.isActive === false) {
+            return {};
+        }
+
+        // The prompt injection to force the AI to maintain the spatial system.
+        const systemInstruction = `
+[SYSTEM: SPATIAL TRACKING ACTIVE]
+You must maintain a spatial tracking system for this scene. 
+{{user}} is at coordinates (0,0).
+Analyze the scene and determine the coordinates (X, Y) and a short "Status" for every other character present relative to {{user}}.
+- X: Horizontal distance (negative = left, positive = right).
+- Y: Forward distance (negative = behind, positive = in front).
+
+Output the result strictly as a valid JSON object wrapped in ${SPATIAL_TAG_OPEN} tags at the very end of your response.
+Format:
+${SPATIAL_TAG_OPEN}
+{
+  "characters": [
+    { "name": "{{char}}", "x": 5, "y": 10, "status": "Walking towards user" }
+  ]
+}
+${SPATIAL_TAG_CLOSE}
+Ensure valid JSON. Do not output this text outside the tags.
+`;
+
         return {
-            /*** @type null | string @description A string to add to the
-             end of the final prompt sent to the LLM,
-             but that isn't persisted. ***/
-            stageDirections: null,
-            /*** @type MessageStateType | null @description the new state after the userMessage. ***/
-            messageState: {'someKey': this.myInternalState['someKey']},
-            /*** @type null | string @description If not null, the user's message itself is replaced
-             with this value, both in what's sent to the LLM and in the database. ***/
-            modifiedMessage: null,
-            /*** @type null | string @description A system message to append to the end of this message.
-             This is unique in that it shows up in the chat log and is sent to the LLM in subsequent messages,
-             but it's shown as coming from a system user and not any member of the chat. If you have things like
-             computed stat blocks that you want to show in the log, but don't want the LLM to start trying to
-             mimic/output them, they belong here. ***/
-            systemMessage: null,
-            /*** @type null | string @description an error message to show
-             briefly at the top of the screen, if any. ***/
-            error: null,
-            chatState: null,
+            // We append this as a system message so the AI sees it as an instruction, 
+            // but it's not put into the user's mouth.
+            systemMessage: systemInstruction,
+            messageState: this.myInternalState, // Pass current state forward
         };
     }
 
+    /***
+     * AFTER RESPONSE
+     * Parse the JSON from the AI, update state, and clean the message.
+     ***/
     async afterResponse(botMessage: Message): Promise<Partial<StageResponse<ChatStateType, MessageStateType>>> {
-        /***
-         This is called immediately after a response from the LLM.
-         ***/
-        const {
-            content,            /*** @type: string
-             @description The LLM's response. ***/
-            anonymizedId,       /*** @type: string
-             @description An anonymized ID that is unique to this individual
-              in this chat, but NOT their Chub ID. ***/
-            isBot             /*** @type: boolean
-             @description Whether this is from a bot, conceivably always true. ***/
-        } = botMessage;
+        if (this.data.config?.isActive === false) {
+            return {};
+        }
+
+        const content = botMessage.content;
+        let finalContent = content;
+        let newState = { ...this.myInternalState };
+
+        // Regex to capture content between the tags (dotall mode to catch newlines)
+        const regex = new RegExp(`${SPATIAL_TAG_OPEN}([\\s\\S]*?)${SPATIAL_TAG_CLOSE}`);
+        const match = content.match(regex);
+
+        if (match && match[1]) {
+            try {
+                const jsonStr = match[1].trim();
+                const parsedData: SpatialPacket = JSON.parse(jsonStr);
+
+                // Update our state with the new data
+                newState.spatialData = parsedData;
+                newState.lastUpdate = Date.now();
+
+                // Update internal state immediately for responsiveness
+                this.myInternalState = newState;
+
+                // Remove the hidden block from the visible message
+                finalContent = content.replace(regex, "").trim();
+
+            } catch (e) {
+                console.error("Spatial System: Failed to parse AI JSON", e);
+                // If parsing fails, we don't crash, we just don't update state.
+                // We typically leave the message alone so the user can see the raw output to debug,
+                // or you could strip it anyway. Let's leave it for debugging if it fails.
+            }
+        }
+
         return {
-            /*** @type null | string @description A string to add to the
-             end of the final prompt sent to the LLM,
-             but that isn't persisted. ***/
-            stageDirections: null,
-            /*** @type MessageStateType | null @description the new state after the botMessage. ***/
-            messageState: {'someKey': this.myInternalState['someKey']},
-            /*** @type null | string @description If not null, the bot's response itself is replaced
-             with this value, both in what's sent to the LLM subsequently and in the database. ***/
-            modifiedMessage: null,
-            /*** @type null | string @description an error message to show
-             briefly at the top of the screen, if any. ***/
-            error: null,
-            systemMessage: null,
-            chatState: null
+            messageState: newState,
+            modifiedMessage: finalContent, // This cleans the chat bubble!
         };
     }
-
 
     render(): ReactElement {
-        /***
-         There should be no "work" done here. Just returning the React element to display.
-         If you're unfamiliar with React and prefer video, I've heard good things about
-         @link https://scrimba.com/learn/learnreact but haven't personally watched/used it.
+        return <SpatialDisplay state={this.myInternalState} />;
+    }
+}
 
-         For creating 3D and game components, react-three-fiber
-           @link https://docs.pmnd.rs/react-three-fiber/getting-started/introduction
-           and the associated ecosystem of libraries are quite good and intuitive.
+/***
+ * COMPONENT: SpatialDisplay
+ * A clean UI to show the "Note of status" and invisible grid data.
+ ***/
+const SpatialDisplay = ({ state }: { state: MessageStateType }) => {
+    // We use a little React hook to force a re-render if the state object changes deeply
+    // though typically the parent render calls this with new props.
+    
+    const chars = state.spatialData?.characters || [];
 
-         Cuberun is a good example of a game built with them.
-           @link https://github.com/akarlsten/cuberun (Source)
-           @link https://cuberun.adamkarlsten.com/ (Demo)
-         ***/
-        return <div style={{
+    return (
+        <div style={{
             width: '100vw',
             height: '100vh',
-            display: 'grid',
-            alignItems: 'stretch'
+            backgroundColor: '#1a1a1a', // Dark theme background
+            color: '#e0e0e0',
+            fontFamily: 'monospace',
+            padding: '20px',
+            boxSizing: 'border-box',
+            overflowY: 'auto'
         }}>
-            <div>Hello World! I'm an empty stage! With {this.myInternalState['someKey']}!</div>
-            <div>There is/are/were {this.myInternalState['numChars']} character(s)
-                and {this.myInternalState['numUsers']} human(s) here.
+            <h2 style={{ borderBottom: '1px solid #444', paddingBottom: '10px' }}>
+                Spatial Status Monitor
+            </h2>
+            
+            {chars.length === 0 ? (
+                <p style={{ color: '#888' }}>No spatial data tracking yet. Start chatting!</p>
+            ) : (
+                <div style={{ display: 'grid', gap: '15px' }}>
+                    {chars.map((char, idx) => (
+                        <div key={idx} style={{
+                            background: '#2a2a2a',
+                            padding: '15px',
+                            borderRadius: '8px',
+                            borderLeft: '4px solid #4caf50'
+                        }}>
+                            <div style={{ fontSize: '1.2em', fontWeight: 'bold', marginBottom: '5px' }}>
+                                {char.name}
+                            </div>
+                            <div style={{ fontSize: '0.9em', color: '#aaa', marginBottom: '10px' }}>
+                                Status: <span style={{ color: '#fff' }}>{char.status}</span>
+                            </div>
+                            <div style={{ 
+                                display: 'grid', 
+                                gridTemplateColumns: '1fr 1fr', 
+                                background: '#111', 
+                                padding: '10px', 
+                                borderRadius: '4px' 
+                            }}>
+                                <div><span style={{color:'#f88'}}>X (Right/Left):</span> {char.x}</div>
+                                <div><span style={{color:'#88f'}}>Y (Front/Back):</span> {char.y}</div>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            )}
+            
+            <div style={{ marginTop: '20px', fontSize: '0.8em', color: '#555' }}>
+                * Grid Center (0,0) is User.
             </div>
-        </div>;
-    }
-
-}
+        </div>
+    );
+};
