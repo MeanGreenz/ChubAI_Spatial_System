@@ -40,8 +40,9 @@ type ConfigType = {
 type InitStateType = any;
 type ChatStateType = any;
 
-const SPATIAL_TAG_OPEN = "<spatial_system>";
-const SPATIAL_TAG_CLOSE = "</spatial_system>";
+// Using code fence style tags to avoid HTML rendering issues in chat
+const SPATIAL_TAG_OPEN = "```spatial_json";
+const SPATIAL_TAG_CLOSE = "```";
 
 /**
  * Try a strict JSON parse first, then attempt a few lenient fixes for
