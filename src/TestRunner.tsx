@@ -1,6 +1,6 @@
-import {Stage} from "./Stage";
-import {useEffect, useState} from "react";
-import {DEFAULT_INITIAL, StageBase, InitialData} from "@chub-ai/stages-ts";
+import { Stage } from "./Stage";
+import { useEffect, useState } from "react";
+import { DEFAULT_INITIAL, StageBase, InitialData } from "@chub-ai/stages-ts";
 
 // Modify this JSON to include whatever character/user information you want to test.
 import InitData from './assets/test-init.json';
@@ -19,7 +19,7 @@ export const TestStageRunner = <StageType extends StageBase<InitStateType, ChatS
     // You may need to add a @ts-ignore here,
     //     as the linter doesn't always like the idea of reading types arbitrarily from files
     // @ts-ignore
-    const [stage, _setStage] = useState(new Stage({...DEFAULT_INITIAL, ...InitData}));
+    const [stage, _setStage] = useState(new Stage({ ...DEFAULT_INITIAL, ...InitData }));
 
     // This is what forces the stage node to re-render.
     const [node, setNode] = useState(new Date());
@@ -87,7 +87,7 @@ export const TestStageRunner = <StageType extends StageBase<InitStateType, ChatS
         // Always do this first, and put any other calls inside the load response.
         stage.load().then((res) => {
             console.info(`Test StageBase Runner load success result was ${res.success}`);
-            if(!res.success || res.error != null) {
+            if (!res.success || res.error != null) {
                 console.error(`Error from stage during load, error: ${res.error}`);
             } else {
                 runTests().then(() => console.info("Done running tests."));
@@ -96,7 +96,7 @@ export const TestStageRunner = <StageType extends StageBase<InitStateType, ChatS
     }, []);
 
     return <>
-        <div style={{display: 'none'}}>{String(node)}{window.location.href}</div>
+        <div style={{ display: 'none' }}>{String(node)}{window.location.href}</div>
         {stage == null ? <div>Stage loading...</div> : stage.render()}
     </>;
 }
