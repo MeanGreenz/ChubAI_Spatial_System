@@ -33,6 +33,8 @@ type MessageStateType = {
  ***/
 type ConfigType = {
     isActive: boolean;
+    // If true, suppresses debug/warning/error console output from this stage.
+    suppressLogs?: boolean;
 };
 
 type InitStateType = any;
@@ -40,6 +42,36 @@ type ChatStateType = any;
 
 const SPATIAL_TAG_OPEN = "<spatial_system>";
 const SPATIAL_TAG_CLOSE = "</spatial_system>";
+
+/**
+ * Try a strict JSON parse first, then attempt a few lenient fixes for
+ * common model output problems (single quotes, trailing commas, stray
+ * surrounding text). Returns parsed object or null if still invalid.
+ */
+function tryParseLenient(jsonStr: string): SpatialPacket | null {
+    try {
+        return JSON.parse(jsonStr);
+    } catch (e1) {
+        try {
+            let s = jsonStr.trim();
+            // Normalize newlines/spacing
+            s = s.replace(/\r?\n/g, ' ');
+            // Replace single quotes with double quotes (common LLM output)
+            s = s.replace(/'/g, '"');
+            // Remove trailing commas before closing braces/brackets
+            s = s.replace(/,\s*([}\]])/g, '$1');
+            // Extract first {...} block if there is surrounding junk
+            const first = s.indexOf('{');
+            const last = s.lastIndexOf('}');
+            if (first !== -1 && last !== -1 && last > first) {
+                s = s.substring(first, last + 1);
+            }
+            return JSON.parse(s);
+        } catch (e2) {
+            return null;
+        }
+    }
+}
 
 export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateType, ConfigType> {
 
@@ -51,8 +83,9 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
         super(data);
         const { messageState, config } = data;
 
-        // Store config for access in hooks
-        this.config = config || { isActive: true };
+        // Store config for access in hooks; apply sensible defaults
+        const defaultConfig: ConfigType = { isActive: true, suppressLogs: false };
+        this.config = { ...defaultConfig, ...(config || {}) };
 
         // Initialize state if it doesn't exist
         this.myInternalState = messageState || {
@@ -134,10 +167,15 @@ Ensure valid JSON. Do not output this text outside the tags.
         const match = content.match(regex);
 
         if (match && match[1]) {
-            try {
-                const jsonStr = match[1].trim();
-                const parsedData: SpatialPacket = JSON.parse(jsonStr);
+            const jsonStr = match[1].trim();
+            const parsedData: SpatialPacket | null = tryParseLenient(jsonStr);
 
+            if (!parsedData) {
+                // Parsing failed even after lenient attempts — surface as an error once to help debugging.
+                if (!this.config?.suppressLogs) {
+                    console.error("Spatial System: Failed to parse AI JSON after lenient attempts", { raw: jsonStr });
+                }
+            } else {
                 // Validate and deduplicate characters (last occurrence wins)
                 if (parsedData.characters && Array.isArray(parsedData.characters)) {
                     const deduplicatedChars: CharacterSpatialInfo[] = [];
@@ -160,7 +198,10 @@ Ensure valid JSON. Do not output this text outside the tags.
                                 });
                                 seenNames.add(char.name);
                             } else {
-                                console.warn(`Spatial System: Invalid coordinates for character "${char.name}"`, { x, y });
+                                // Use debug instead of warn to reduce console noise in normal operation.
+                                if (!this.config?.suppressLogs) {
+                                    console.debug(`Spatial System: Invalid coordinates for character "${char.name}"`, { x, y });
+                                }
                             }
                         }
                     }
@@ -177,12 +218,6 @@ Ensure valid JSON. Do not output this text outside the tags.
 
                 // Remove the hidden block from the visible message
                 finalContent = content.replace(regex, "").trim();
-
-            } catch (e) {
-                console.error("Spatial System: Failed to parse AI JSON", e);
-                // If parsing fails, we don't crash, we just don't update state.
-                // We typically leave the message alone so the user can see the raw output to debug,
-                // or you could strip it anyway. Let's leave it for debugging if it fails.
             }
         }
 
