@@ -1,4 +1,4 @@
-import { ReactElement, useState, useEffect } from "react";
+import { ReactElement } from "react";
 import { StageBase, StageResponse, InitialData, Message } from "@chub-ai/stages-ts";
 import { LoadResponse } from "@chub-ai/stages-ts/dist/types/load";
 
@@ -37,8 +37,8 @@ type ConfigType = {
     suppressLogs?: boolean;
 };
 
-type InitStateType = any;
-type ChatStateType = any;
+type InitStateType = unknown;
+type ChatStateType = unknown;
 
 // Using code fence style tags to avoid HTML rendering issues in chat
 const SPATIAL_TAG_OPEN = "```spatial_json";
@@ -69,9 +69,33 @@ function tryParseLenient(jsonStr: string): SpatialPacket | null {
             }
             return JSON.parse(s);
         } catch (e2) {
+            console.error('Spatial System: JSON parsing failed after lenient attempts', {
+                originalError: e1,
+                lenientError: e2,
+                input: jsonStr.substring(0, 100) + (jsonStr.length > 100 ? '...' : '')
+            });
             return null;
         }
     }
+}
+
+/**
+ * Validates spatial coordinates and ensures they are within reasonable bounds
+ */
+function validateCoordinates(x: number, y: number): { x: number, y: number, valid: boolean } {
+    // Define reasonable bounds for spatial coordinates
+    const MAX_COORDINATE = 1000;
+    const MIN_COORDINATE = -1000;
+
+    if (isNaN(x) || isNaN(y)) {
+        return { x: 0, y: 0, valid: false };
+    }
+
+    // Clamp coordinates to reasonable bounds
+    x = Math.max(MIN_COORDINATE, Math.min(MAX_COORDINATE, x));
+    y = Math.max(MIN_COORDINATE, Math.min(MAX_COORDINATE, y));
+
+    return { x, y, valid: true };
 }
 
 export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateType, ConfigType> {
@@ -116,6 +140,11 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
      * Inject the instructions to the LLM to generate the JSON.
      ***/
     async beforePrompt(userMessage: Message): Promise<Partial<StageResponse<ChatStateType, MessageStateType>>> {
+        // Log the user message for debugging purposes (only in development)
+        if (!this.config?.suppressLogs && (import.meta as any).env.MODE === 'development') {
+            console.debug('Spatial System: Processing user message', { content: userMessage.content });
+        }
+
         // If the stage is turned off in config, do nothing.
         if (this.config?.isActive === false) {
             return {};
@@ -161,7 +190,7 @@ Ensure valid JSON. Do not output this text outside the tags.
 
         const content = botMessage.content;
         let finalContent = content;
-        let newState = { ...this.myInternalState };
+        const newState = { ...this.myInternalState };
 
         // Regex to capture content between the tags (dotall mode to catch newlines)
         const regex = new RegExp(`${SPATIAL_TAG_OPEN}([\\s\\S]*?)${SPATIAL_TAG_CLOSE}`);
@@ -186,11 +215,13 @@ Ensure valid JSON. Do not output this text outside the tags.
                     for (let i = parsedData.characters.length - 1; i >= 0; i--) {
                         const char = parsedData.characters[i];
                         if (char && char.name && !seenNames.has(char.name)) {
-                            // Validate numeric fields
-                            const x = typeof char.x === 'number' ? char.x : (typeof char.x === 'string' ? parseFloat(char.x) : 0);
-                            const y = typeof char.y === 'number' ? char.y : (typeof char.y === 'string' ? parseFloat(char.y) : 0);
+                            // Parse and validate coordinates
+                            const parsedX = typeof char.x === 'number' ? char.x : (typeof char.x === 'string' ? parseFloat(char.x) : 0);
+                            const parsedY = typeof char.y === 'number' ? char.y : (typeof char.y === 'string' ? parseFloat(char.y) : 0);
 
-                            if (!isNaN(x) && !isNaN(y)) {
+                            const { x, y, valid } = validateCoordinates(parsedX, parsedY);
+
+                            if (valid) {
                                 deduplicatedChars.unshift({
                                     name: char.name,
                                     x: x,
@@ -201,7 +232,10 @@ Ensure valid JSON. Do not output this text outside the tags.
                             } else {
                                 // Use debug instead of warn to reduce console noise in normal operation.
                                 if (!this.config?.suppressLogs) {
-                                    console.debug(`Spatial System: Invalid coordinates for character "${char.name}"`, { x, y });
+                                    console.debug(`Spatial System: Invalid coordinates for character "${char.name}" (clamped to bounds)`, {
+                                        original: { x: parsedX, y: parsedY },
+                                        clamped: { x, y }
+                                    });
                                 }
                             }
                         }

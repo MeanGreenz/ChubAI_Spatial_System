@@ -3,13 +3,14 @@ import react from '@vitejs/plugin-react'
 import dts from 'vite-plugin-dts'
 import { resolve } from 'path'
 
-export default defineConfig(({ command, mode }) => {
+export default defineConfig(({ mode }) => {
     if (mode != 'lib') {
         return {
             plugins: [react()]
         }
     } else {
-        return { plugins: [
+        return {
+            plugins: [
                 react(),
                 dts({
                     outDir: ['dist'],

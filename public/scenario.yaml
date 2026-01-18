@@ -1,17 +1,46 @@
-# If you want to (A) have your extension run without characters, or
-#         (B) Run with a predefined set of characters, you can set that up here.
+# ChubAI Spatial System - Scenario Configuration
+# This file configures the spatial tracking system for your scenario
 
-# Some name to display in search.
-# name: My Scenario
+# Scenario name (displayed in search and UI)
+name: Spatial Tracking Demo
 
-# If you want your scenario to run without characters, have a character array like this:
+# Description of this spatial system configuration
+description: A demonstration of the ChubAI spatial tracking system that monitors character positions relative to the user
+
+# Character configuration options:
+# Option 1: Run without specific characters (user only)
 # characters:
-#  - 'self'
+#   - 'self'
 
-# If you want to run with predefined characters, you can give them instead:
+# Option 2: Use predefined characters by ID
 # characters:
-#   - 88      # You can give their number id as copied from the drop-down, or
-#   - 'characters/BartlebyTheScrivener/detailed-example-character'    # Its full URL path, or
-#   - '@characters/susan.yaml'     # A relative path from this public folder to a definition file
+#   - 88
+#   - 123
 
-# scenario: "The scenario text to override all character(s)' scenario field with, if any."
+# Option 3: Use character definition files (recommended for spatial tracking)
+characters:
+  - '@characters/susan.yaml'  # Relative path to character definition
+
+# Scenario override (optional)
+# This text will override the scenario field for all characters
+scenario: "You are in a spatial tracking environment. The system will monitor character positions relative to you (the user at coordinates 0,0)."
+
+# Spatial system configuration
+spatial_config:
+  # Maximum tracking distance (coordinates will be clamped to these bounds)
+  max_distance: 1000
+  # Minimum tracking distance
+  min_distance: -1000
+  # Default coordinate system explanation
+  coordinate_system: "X: Horizontal (left/right), Y: Depth (front/back), User at (0,0)"
+
+# Example character positions for testing:
+# - Susan: {x: 5, y: 10, status: "Standing nearby"}
+# - Bartleby: {x: -3, y: 8, status: "Approaching from left"}
+# - Boss: {x: 0, y: 15, status: "At desk ahead"}
+
+# Notes:
+# - The spatial system automatically tracks character positions from AI responses
+# - Positions are relative to the user at coordinates (0,0)
+# - Coordinates are validated and clamped to reasonable bounds
+# - Invalid positions are logged and handled gracefully
