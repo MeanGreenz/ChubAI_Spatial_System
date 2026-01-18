@@ -193,7 +193,10 @@ Ensure valid JSON. Do not output this text outside the tags.
         const newState = { ...this.myInternalState };
 
         // Regex to capture content between the tags (dotall mode to catch newlines)
-        const regex = new RegExp(`${SPATIAL_TAG_OPEN}([\\s\\S]*?)${SPATIAL_TAG_CLOSE}`);
+        // Escape backticks for regex pattern
+        const escapedOpen = SPATIAL_TAG_OPEN.replace(/`/g, '\\`');
+        const escapedClose = SPATIAL_TAG_CLOSE.replace(/`/g, '\\`');
+        const regex = new RegExp(`${escapedOpen}([\\s\\S]*?)${escapedClose}`);
         const match = content.match(regex);
 
         if (match && match[1]) {
